@@ -10,7 +10,7 @@ from tkinter import Label, Button, Canvas, Checkbutton, BooleanVar
 # 템플릿 이미지 경로 (숫자 템플릿)
 template_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")  # 템플릿 이미지 디렉토리
 
-# 빨간색 범위 설정
+# 빨간색 범위 설정 (HSV 색공간을 사용)
 LOWER_RED = np.array([0, 100, 100])
 UPPER_RED = np.array([10, 255, 255])
 LOWER_RED2 = np.array([170, 100, 100])
@@ -91,35 +91,30 @@ def process_image(image, is_save_debug_image):
                 cv2.rectangle(processed_image, (x, y), (x + w, y + h), (0, 255, 0), 2)  # 사각형 표시
 
     print(f"검출된 숫자들: {detected_numbers}")
+    print(f"포지션: {positions}")
     return detected_numbers, positions
 
-def find_sum_10_pairs(numbers, positions):
-    """합이 10이 되는 숫자 쌍을 찾아 위치 쌍 리스트로 반환"""
-    print(f"합이 10인 쌍 찾기 시작, 숫자들: {numbers}")
-    pairs = []
-    used = set()
-
-    for i in range(len(numbers)):
-        for j in range(i + 1, len(numbers)):
-            if numbers[i] + numbers[j] == 10 and i not in used and j not in used:
-                pairs.append((positions[i], positions[j]))
-                used.add(i)
-                used.add(j)
-
-    print(f"합이 10인 쌍 찾기 완료, 총 {len(pairs)}개의 쌍 발견")
-    return pairs
-
 def perform_drag(pairs):
-    """좌표 쌍을 받아서 마우스 드래그 수행"""
-    print(f"마우스 드래그 시작, 드래그할 좌표 쌍: {pairs}")
     for (start, end) in pairs:
-        pyautogui.moveTo(start[0], start[1])  # 시작점 이동
-        pyautogui.mouseDown()  # 마우스 버튼 누름
-        time.sleep(0.2)  # 자연스러운 동작을 위한 딜레이
-        pyautogui.moveTo(end[0], end[1])  # 끝점으로 이동
-        pyautogui.mouseUp()  # 마우스 버튼 뗌
-        time.sleep(0.5)  # 다음 동작을 위한 간격
-    print("마우스 드래그 완료")
+        start_x, start_y = start
+        end_x, end_y = end
+
+        # 디버깅: 드래그 좌표 출력
+        print(f"드래그 시작: ({start_x}, {start_y}), 종료: ({end_x}, {end_y})")
+
+        # 화면 크기 확인
+        screen_width, screen_height = pyautogui.size()
+        
+        # 좌표가 화면 범위 내에 있는지 확인
+        if 0 <= start_x < screen_width and 0 <= start_y < screen_height and 0 <= end_x < screen_width and 0 <= end_y < screen_height:
+            # 마우스 이동
+            pyautogui.moveTo(start_x, start_y)  # 시작점으로 이동
+            pyautogui.mouseDown()
+            pyautogui.moveTo(end_x, end_y)  # 끝점으로 드래그
+            pyautogui.mouseUp()
+        else:
+            print(f"좌표가 화면 범위를 벗어났습니다: ({start_x}, {start_y}) -> ({end_x}, {end_y})")
+
 
 class GameBotGUI:
     def __init__(self, root):
@@ -146,7 +141,7 @@ class GameBotGUI:
 
         self.detected_numbers = []
         self.positions = []
-        self.grid_numbers = [[None for _ in range(15)] for _ in range(10)]  # 15x10 배열
+        self.grid_numbers = [[None for _ in range(15)] for _ in range(10)]  # 15x10 배열 초기화
 
     def capture_and_detect(self):
         self.label.config(text="화면 캡처 중...")
@@ -163,44 +158,48 @@ class GameBotGUI:
 
             # 체크박스 상태 전달
             is_save_debug_image = self.debug_var.get()
-        if not self.positions:
-            print("위치 정보가 없습니다.")
-            return
 
-        # 화면 크기에서 셀 크기 계산 (대략적인 그리드 스케일링)
-        min_x = min(pos[0] for pos in self.positions)
-        max_x = max(pos[0] for pos in self.positions)
-        min_y = min(pos[1] for pos in self.positions)
-        max_y = max(pos[1] for pos in self.positions)
+            self.detected_numbers, self.positions = process_image(red_area, is_save_debug_image)
 
-        x_spacing = (max_x - min_x) / 14  # 15칸
-        y_spacing = (max_y - min_y) / 9   # 10칸
+            if not self.positions:  # 위치 정보가 없을 경우 처리
+                print("위치 정보가 없습니다.")
+                return
 
-        self.grid_numbers = [[None for _ in range(15)] for _ in range(10)]  # 초기화
+            # 화면 크기에서 셀 크기 계산 (대략적인 그리드 스케일링)
+            min_x = min(pos[0] for pos in self.positions)
+            max_x = max(pos[0] for pos in self.positions)
+            min_y = min(pos[1] for pos in self.positions)
+            max_y = max(pos[1] for pos in self.positions)
 
+            x_spacing = (max_x - min_x) / 14  # 15칸
+            y_spacing = (max_y - min_y) / 9   # 10칸
+
+            self.grid_numbers = [[None for _ in range(15)] for _ in range(10)]  # 15x10 배열 초기화
+
+            for num, (x, y) in zip(self.detected_numbers, self.positions):
+                grid_x = round((x - min_x) / x_spacing)
+                grid_y = round((y - min_y) / y_spacing)
+
+                if 0 <= grid_x < 15 and 0 <= grid_y < 10:
+                    self.grid_numbers[grid_y][grid_x] = num
+
+            self.label.config(text=f"인식된 숫자: {len(self.detected_numbers)}")
+            self.assign_numbers_to_grid(min_x, max_x, min_y, max_y, x_spacing, y_spacing)
+            self.display_grid()
+
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            self.label.config(text=f"오류 발생: {e}")
+
+    def assign_numbers_to_grid(self, min_x, max_x, min_y, max_y, x_spacing, y_spacing):
+        """ grid_numbers에 숫자 배치 """
+        print("숫자 그리드에 배치 시작")
         for num, (x, y) in zip(self.detected_numbers, self.positions):
             grid_x = round((x - min_x) / x_spacing)
             grid_y = round((y - min_y) / y_spacing)
 
             if 0 <= grid_x < 15 and 0 <= grid_y < 10:
-
-
-            self.detected_numbers, self.positions = process_image(red_area, is_save_debug_image)
-
-            if self.detected_numbers:
-                self.label.config(text=f"인식된 숫자: {len(self.detected_numbers)}")
-                self.assign_numbers_to_grid()
-                self.display_grid()
-            else:
-                self.label.config(text="숫자를 인식하지 못했습니다.")
-        except Exception as e:
-            print(f"오류 발생: {e}")
-            self.label.config(text=f"오류 발생: {e}")
-
-    def assign_numbers_to_grid(self):
-        """ 숫자를 15×10 그리드에 맞게 정렬 """
-        print("숫자 그리드에 배치 시작")
-        self.grid_numbers[grid_y][grid_x] = num
+                self.grid_numbers[grid_y][grid_x] = num  # 이 줄은 print와 분리
         print("숫자 그리드에 배치 완료")
 
     def display_grid(self):
@@ -220,16 +219,48 @@ class GameBotGUI:
                     self.canvas.create_text(x, y, text=str(self.grid_numbers[row][col]), font=("Arial", 14), fill="blue")
 
     def auto_play(self):
+        pairs = []
         self.label.config(text="자동 드래그 실행 중...")
         self.root.update()
 
-        pairs = find_sum_10_pairs(self.detected_numbers, self.positions)
-        if pairs:
-            perform_drag(pairs)
-            self.label.config(text="자동 플레이 완료!")
-        else:
-            self.label.config(text="합이 10이 되는 조합이 없음.")
+        while True:
+            print("계산 시작")
+
+            print(f"{self.grid_numbers}")
+            pairs = []  # 합이 10이 되는 숫자 쌍을 저장할 리스트 초기화
+            
+            # 합이 10이 되는 숫자들 찾기
+            for i in range(len(self.grid_numbers)):
+                for j in range(i + 1, len(self.grid_numbers)):
+                    if self.grid_numbers[i] + self.grid_numbers[j] == 10:
+                        pair = (self.positions[i], self.positions[j])
+
+                        # 그리드 좌표를 화면 좌표로 변환
+                        start_screen_coords = grid_to_screen_coords(pair[0][0], pair[0][1])
+                        end_screen_coords = grid_to_screen_coords(pair[1][0], pair[1][1])
+
+                        pairs.append((start_screen_coords, end_screen_coords))
+
+                        # 드래그가 완료된 후 해당 숫자들을 0으로 설정
+                        self.grid_numbers[i] = 0
+                        self.grid_numbers[j] = 0
+
+                        # 해당 숫자들의 위치도 None으로 설정
+                        self.positions[i] = None
+                        self.positions[j] = None
+
+            print(f"합이 10인 쌍 찾기 완료, 총 {len(pairs)}개의 쌍 발견")
+            if pairs:
+                perform_drag(pairs)  # 드래그 실행
+                time.sleep(1)  # 드래그 후 잠시 대기
+            else:
+                break  # 더 이상 합이 10이 되는 숫자가 없으면 종료
+
+        # 자동 드래그 완료
+        self.label.config(text="자동 플레이 완료!")
         self.root.update()
+
+
 
 
 if __name__ == "__main__":
