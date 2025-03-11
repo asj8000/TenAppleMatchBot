@@ -1,12 +1,14 @@
 import cv2
-import pytesseract
 import pyautogui
-import tkinter as tk
-from tkinter import Label, Button, Canvas
-from PIL import Image, ImageTk
 import numpy as np
 import os
 import time
+import tkinter as tk
+from tkinter import Label, Button, Canvas, Checkbutton, BooleanVar
+
+
+# 템플릿 이미지 경로 (숫자 템플릿)
+template_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")  # 템플릿 이미지 디렉토리
 
 # 빨간색 범위 설정
 LOWER_RED = np.array([0, 100, 100])
@@ -14,15 +16,12 @@ UPPER_RED = np.array([10, 255, 255])
 LOWER_RED2 = np.array([170, 100, 100])
 UPPER_RED2 = np.array([180, 255, 255])
 
-script_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "image")
-print(f"스크립트 경로: {script_dir}")
-
 def capture_screen():
     print("화면 캡처 시작")
     screenshot = pyautogui.screenshot()
     screenshot = np.array(screenshot)
     screenshot = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
-    screenshot_path = os.path.join(script_dir, "screenshot_1.png")
+    screenshot_path = "screenshot_1.png"
     cv2.imwrite(screenshot_path, screenshot)
     print(f"스크린샷 저장: {screenshot_path}")
     return screenshot
@@ -34,18 +33,28 @@ def extract_red_area(image):
     mask2 = cv2.inRange(hsv, LOWER_RED2, UPPER_RED2)
     red_mask = cv2.bitwise_or(mask1, mask2)
     red_area = cv2.bitwise_and(image, image, mask=red_mask)
-    red_area_path = os.path.join(script_dir, "red_area.png")
-    cv2.imwrite(red_area_path, red_area)
-    print(f"빨간색 영역 저장: {red_area_path}")
+    print(f"빨간색 영역 추출 완료, 빨간색 영역 크기: {np.sum(red_mask)}")
     return red_area
 
-def process_image(image):
+def find_template_matches(image, template):
+    print("매칭해드려요~")
+    result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
+    threshold = 0.9  # 템플릿 매칭 유사도 기준
+    locations = np.where(result >= threshold)
+    print(f"매칭 결과: {len(locations[0])}개의 매칭 위치가 발견됨")
+    
+    # 결과를 사각형으로 표시
+    matches = []
+    for pt in zip(*locations[::-1]):  # (x, y) 좌표 변환
+        matches.append(pt)
+    print(f"매칭된 위치들: {matches}")
+    return matches
+
+def process_image(image, is_save_debug_image):
     print("이미지 처리 시작")
 
-    # 초기화
     detected_numbers = []  # 숫자 리스트
     positions = []  # 위치 리스트
-    cropped_images = []  # 잘라낸 이미지 리스트
 
     # HSV 변환 (배경과 사과 제거)
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -57,52 +66,36 @@ def process_image(image):
     processed_image = np.zeros_like(image)  # 배경을 검은색으로 초기화
     processed_image[red_mask == 255] = [255, 255, 255]  # 빨간색 영역을 흰색으로 설정
 
-    # grayscale
-    gray = cv2.cvtColor(processed_image, cv2.COLOR_BGR2GRAY)
+    # 템플릿 이미지 목록 가져오기
+    templates = []
+    for i in range(10):  # 0부터 9까지의 숫자 템플릿 이미지
+        template_path = os.path.join(template_dir, f"{i}.png")
+        if os.path.exists(template_path):
+            template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+            templates.append((i, template))
+    print("템플릿 이미지 리스트 호출 완료")
 
-    # Adaptive Threshold
-    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    # 각 템플릿에 대해 매칭 수행
+    for num, template in templates:
+        gray = cv2.cvtColor(processed_image, cv2.COLOR_BGR2GRAY)
+        print(f"{num}번 템플릿을 사용한 매칭 시작")
+        matches = find_template_matches(gray, template)
 
-    # Morphology 연산 적용
-    kernel = np.ones((3, 3), np.uint8)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        for match in matches:
+            x, y = match
+            w, h = template.shape[::-1]
+            detected_numbers.append(num)
+            positions.append((x + w//2, y + h//2))
 
-    # 경계선 확인을 위한 Canny Edge Detection
-    edges = cv2.Canny(thresh, 100, 200)
+            if is_save_debug_image:  # 디버그 이미지 저장 여부 확인
+                cv2.rectangle(processed_image, (x, y), (x + w, y + h), (0, 255, 0), 2)  # 사각형 표시
 
-    # 윤곽선 검출
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    print(f"찾은 윤곽선 개수: {len(contours)}")
-
-    for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
-
-        # 숫자 이미지 사이즈 필터링
-        if 10 < w < 80 and 10 < h < 80 and 0.5 < w/h < 2:
-            roi = gray[y:y+h, x:x+w]
-
-            # OCR
-            num = pytesseract.image_to_string(roi, config="--psm 7 -c tessedit_char_whitelist=0123456789").strip()
-
-            if num.isdigit():
-                detected_numbers.append(int(num))
-                positions.append((x + w//2, y + h//2))
-                cropped_image_path = os.path.join(script_dir, f"r_{num}_{x}_{y}.png")
-                cv2.imwrite(cropped_image_path, roi)
-                print(f"잘라낸 이미지 저장: {cropped_image_path}")
-                cropped_images.append(roi)
-            else:
-                print(f"인식된 텍스트는 숫자가 아님: {num}")
-                cropped_image_path = os.path.join(script_dir, f"failed_{num}_{x}_{y}.png")
-                cv2.imwrite(cropped_image_path, roi)
-                print(f"잘라낸 이미지 저장: {cropped_image_path}")
-
-    return detected_numbers, positions
-
+    print(f"검출된 숫자들: {detected_numbers}")
     return detected_numbers, positions
 
 def find_sum_10_pairs(numbers, positions):
     """합이 10이 되는 숫자 쌍을 찾아 위치 쌍 리스트로 반환"""
+    print(f"합이 10인 쌍 찾기 시작, 숫자들: {numbers}")
     pairs = []
     used = set()
 
@@ -113,10 +106,12 @@ def find_sum_10_pairs(numbers, positions):
                 used.add(i)
                 used.add(j)
 
+    print(f"합이 10인 쌍 찾기 완료, 총 {len(pairs)}개의 쌍 발견")
     return pairs
 
 def perform_drag(pairs):
     """좌표 쌍을 받아서 마우스 드래그 수행"""
+    print(f"마우스 드래그 시작, 드래그할 좌표 쌍: {pairs}")
     for (start, end) in pairs:
         pyautogui.moveTo(start[0], start[1])  # 시작점 이동
         pyautogui.mouseDown()  # 마우스 버튼 누름
@@ -124,6 +119,7 @@ def perform_drag(pairs):
         pyautogui.moveTo(end[0], end[1])  # 끝점으로 이동
         pyautogui.mouseUp()  # 마우스 버튼 뗌
         time.sleep(0.5)  # 다음 동작을 위한 간격
+    print("마우스 드래그 완료")
 
 class GameBotGUI:
     def __init__(self, root):
@@ -143,6 +139,11 @@ class GameBotGUI:
         self.play_btn = Button(root, text="자동 드래그 실행", command=self.auto_play)
         self.play_btn.pack()
 
+        # 체크박스: 디버그 이미지 저장 여부
+        self.debug_var = tk.BooleanVar()  # BooleanVar 객체 생성
+        self.debug_checkbox = Checkbutton(root, text="디버그 이미지 저장", variable=self.debug_var)
+        self.debug_checkbox.pack()
+
         self.detected_numbers = []
         self.positions = []
         self.grid_numbers = [[None for _ in range(15)] for _ in range(10)]  # 15x10 배열
@@ -160,21 +161,10 @@ class GameBotGUI:
             self.label.config(text="이미지 처리 중...")
             self.root.update()
 
-            self.detected_numbers, self.positions = process_image(red_area)
-
-            if self.detected_numbers:
-                self.label.config(text=f"인식된 숫자: {len(self.detected_numbers)}")
-                self.assign_numbers_to_grid()
-                self.display_grid()
-            else:
-                self.label.config(text="숫자를 인식하지 못했습니다.")
-        except Exception as e:
-            print(f"오류 발생: {e}")
-            self.label.config(text=f"오류 발생: {e}")
-
-    def assign_numbers_to_grid(self):
-        """ 숫자를 15×10 그리드에 맞게 정렬 """
+            # 체크박스 상태 전달
+            is_save_debug_image = self.debug_var.get()
         if not self.positions:
+            print("위치 정보가 없습니다.")
             return
 
         # 화면 크기에서 셀 크기 계산 (대략적인 그리드 스케일링)
@@ -193,7 +183,25 @@ class GameBotGUI:
             grid_y = round((y - min_y) / y_spacing)
 
             if 0 <= grid_x < 15 and 0 <= grid_y < 10:
-                self.grid_numbers[grid_y][grid_x] = num
+
+
+            self.detected_numbers, self.positions = process_image(red_area, is_save_debug_image)
+
+            if self.detected_numbers:
+                self.label.config(text=f"인식된 숫자: {len(self.detected_numbers)}")
+                self.assign_numbers_to_grid()
+                self.display_grid()
+            else:
+                self.label.config(text="숫자를 인식하지 못했습니다.")
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            self.label.config(text=f"오류 발생: {e}")
+
+    def assign_numbers_to_grid(self):
+        """ 숫자를 15×10 그리드에 맞게 정렬 """
+        print("숫자 그리드에 배치 시작")
+        self.grid_numbers[grid_y][grid_x] = num
+        print("숫자 그리드에 배치 완료")
 
     def display_grid(self):
         """ 캔버스에 15×10 숫자 그리드 표시 """
