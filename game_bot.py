@@ -8,7 +8,7 @@ from tkinter import Label, Button, Canvas, Checkbutton, BooleanVar
 from itertools import combinations
 
 # 템플릿 이미지 경로 (숫자 템플릿)
-template_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")  # 템플릿 이미지 디렉토리
+template_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")
 
 # 빨간색 범위 설정 (HSV 색공간을 사용)
 LOWER_RED = np.array([0, 100, 100])
@@ -36,7 +36,7 @@ def extract_red_area(image):
     print(f"빨간색 영역 추출 완료, 빨간색 영역 크기: {np.sum(red_mask)}")
     return red_area
 
-def find_template_matches(image, template):
+def find_numbers_by_template(image, template):
     print("매칭해드려요~")
     result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
     threshold = 0.9  # 템플릿 매칭 유사도 기준
@@ -79,7 +79,7 @@ def process_image(image, is_save_debug_image):
     for num, template in templates:
         gray = cv2.cvtColor(processed_image, cv2.COLOR_BGR2GRAY)
         print(f"{num}번 템플릿을 사용한 매칭 시작")
-        matches = find_template_matches(gray, template)
+        matches = find_numbers_by_template(gray, template)
 
         for match in matches:
             x, y = match
@@ -90,9 +90,14 @@ def process_image(image, is_save_debug_image):
             if is_save_debug_image:  # 디버그 이미지 저장 여부 확인
                 cv2.rectangle(processed_image, (x, y), (x + w, y + h), (0, 255, 0), 2)  # 사각형 표시
 
-    print(f"검출된 숫자들: {detected_numbers}")
-    print(f"포지션: {positions}")
     return detected_numbers, positions
+
+def calculate_drag_duration_by_drag_size(start_x, start_y, end_x, end_y):
+    diff_x = end_x - start_x
+    diff_y = end_y - start_y
+    diff = diff_x + diff_y
+    duration = diff / 1000 / 1.2
+    return duration
 
 def perform_drag(pairs):
     for (start, end) in pairs:
@@ -108,28 +113,30 @@ def perform_drag(pairs):
         # 좌표가 화면 범위 내에 있는지 확인
         if 0 <= start_x < screen_width and 0 <= start_y < screen_height and 0 <= end_x < screen_width and 0 <= end_y < screen_height:
             # 마우스 이동
+            duration = calculate_drag_duration_by_drag_size(start_x, start_y, end_x, end_y)
             pyautogui.moveTo(start_x, start_y)  # 시작점으로 이동
             pyautogui.mouseDown()
-            pyautogui.moveTo(end_x, end_y, duration=0.5)  # 끝점으로 드래그, 0.5초 동안 이동
-            time.sleep(0.5)  # 드래그 후 0.1초 대기
+            pyautogui.moveTo(end_x, end_y, duration)  # 끝점으로 드래그
+            time.sleep(0.2)  # 드래그 후 0.1초 대기
             pyautogui.mouseUp()  # 드래그 마무리
             time.sleep(0.1)  # 다음 드래그 전 대기 시간
         else:
             print(f"좌표가 화면 범위를 벗어났습니다: ({start_x}, {start_y}) -> ({end_x}, {end_y})")
 
 def grid_to_screen_coords(is_start, grid_x, grid_y):
-    size = 50
+    size = 60
     if is_start:
         return (grid_x - size), (grid_y - size);
     else:
         return (grid_x + size), (grid_y + size);
 
 def sum_range(arr, start_x, start_y, end_x, end_y):
+    # print(f"sum_range start_x : {start_x}, start_y : {start_y}, end_x : {end_x}, end_y : {end_y}")
     total = 0
-    # 주어진 범위에 대해 합을 구합니다.
-    for i in range(start_x, end_x + 1):
-        for j in range(start_y, end_y + 1):
-            total += arr[i][j]
+    for x in range(start_x, end_x + 1):
+        for y in range(start_y, end_y + 1):
+            # print(f"arr[y][x] : {arr[y][x]}, and total is {total}")
+            total += arr[y][x]
     return total
 
 
@@ -138,23 +145,20 @@ class GameBotGUI:
         self.root = root
         self.root.title("자동 플레이 봇")
 
-        self.capture_btn = Button(root, text="화면 캡처", command=self.capture_and_detect)
+        self.capture_btn = Button(root, text="시작", command=self.capture_and_detect)
         self.capture_btn.pack()
 
-        self.label = Label(root, text="게임 화면을 캡처하세요")
+        self.label = Label(root, text="게임을 먼저 실행시킨 후, 시작 버튼을 눌러주세요")
         self.label.pack()
 
         # 숫자 배치를 위한 Canvas (17x10 그리드)
         self.canvas = Canvas(root, width=680, height=400, bg="white")
         self.canvas.pack()
 
-        self.play_btn = Button(root, text="자동 드래그 실행", command=self.auto_play)
-        self.play_btn.pack()
-
         # 체크박스: 디버그 이미지 저장 여부
         self.debug_var = tk.BooleanVar()  # BooleanVar 객체 생성
-        self.debug_checkbox = Checkbutton(root, text="디버그 이미지 저장", variable=self.debug_var)
-        self.debug_checkbox.pack()
+        # self.debug_checkbox = Checkbutton(root, text="디버그 이미지 저장", variable=self.debug_var)
+        # self.debug_checkbox.pack()
 
         self.detected_numbers = []
         self.positions = []
@@ -206,6 +210,7 @@ class GameBotGUI:
             self.label.config(text=f"인식된 숫자: {len(self.detected_numbers)}")
             self.assign_numbers_to_grid(min_x, max_x, min_y, max_y, x_spacing, y_spacing)
             self.display_grid()
+            self.auto_play()
 
         except Exception as e:
             print(f"오류 발생: {e}")
@@ -238,10 +243,9 @@ class GameBotGUI:
                 self.canvas.create_rectangle(x-15, y-15, x+15, y+15, outline="black")  # 칸 그리기
 
                 if self.grid_numbers[row][col] == 0:
-                    color = "black"
-
-                if self.grid_numbers[row][col] is not None:
-                    self.canvas.create_text(x, y, text=str(self.grid_numbers[row][col]), font=("Arial", 14), fill=color)
+                    self.canvas.create_text(x, y, text=str("-"), font=("Arial", 14), fill="black")
+                else:
+                    self.canvas.create_text(x, y, text=str(self.grid_numbers[row][col]), font=("Arial", 14), fill="blue")
 
     def auto_play(self):
         pairs = []
@@ -255,38 +259,36 @@ class GameBotGUI:
             pairs = []  # 합이 10이 되는 숫자 쌍을 저장할 리스트 초기화
 
             # 합이 10이 되는 숫자들 찾기
-            for i in range(len(self.grid_numbers)):
-                for j in range(len(self.grid_numbers[i]) - 1):
-                    if(self.grid_numbers[i][j] == 0):
-                        break
-                    for r in range(j, len(self.grid_numbers[i])):
-                        added = sum_range(self.grid_numbers[i], j, r)
-                        if added > 10:
-                            break
-                        if added == 10:
+            for start_y in range(len(self.grid_numbers)):
+                for start_x in range(len(self.grid_numbers[0])):
+                    # print(f"checking {start_y},{start_x} now")
+                    # 이 좌표에서 경우의수 다 대입해봄.
+                    for end_y in range(start_y, len(self.grid_numbers)):
+                        for end_x in range(start_x, len(self.grid_numbers[0])):
+                            added = sum_range(self.grid_numbers, start_x, start_y, end_x, end_y)
+                            if added > 10:
+                                break
+                            if added == 10:
+                                pair = (self.grid_positions[start_y][start_x], self.grid_positions[end_y][end_x])
+                                print(f"{start_y}{start_x}, {end_y}{end_x}, added : {added}, positions : {pair}")
+                                # for va in range(start_y, end_y+1):
+                                #     print(f"self.grid_numbers[{start_x}][{va}] : {self.grid_numbers[satrt_x][va]}")
 
-                            pair = (self.grid_positions[i][j], self.grid_positions[i][r])
-                            print(f"{i}{j}, {i}{r}, added : {added}, positions : {pair}")
-                            for va in range(j, r+1):
-                                print(f"self.grid_numbers[{i}][{va}] : {self.grid_numbers[i][va]}")
+                                # 그리드 좌표를 화면 좌표로 변환
+                                start_screen_coords = grid_to_screen_coords(True, pair[0][0], pair[0][1])
+                                end_screen_coords = grid_to_screen_coords(False, pair[1][0], pair[1][1])
 
-                            # 그리드 좌표를 화면 좌표로 변환
-                            start_screen_coords = grid_to_screen_coords(True, pair[0][0], pair[0][1])
-                            end_screen_coords = grid_to_screen_coords(False, pair[1][0], pair[1][1])
+                                pairs.append((start_screen_coords, end_screen_coords))
 
-                            pairs.append((start_screen_coords, end_screen_coords))
-
-                            # 그리드의 숫자들을 0으로 설정
-                            for idx in range(j, r+1):
-                                self.grid_numbers[i][idx] = 0
-
-                            # 해당 위치들도 None으로 설정
-                            for idx in range(j, r+1):
-                                self.grid_positions[i][idx] = None
-                            break
+                                # 그리드의 숫자들을 0으로 설정
+                                for x_idx in range(start_x, end_x + 1):
+                                    for y_idx in range(start_y, end_y + 1):
+                                        # print(f"grid_numbers[{x_idx}][{y_idx}] is deleted]")
+                                        self.grid_numbers[y_idx][x_idx] = 0
+                                break
 
 
-            print(f"합이 10인 쌍 찾기 완료, 총 {len(pairs)}개의 쌍 발견")
+            print(f"짝꿍 찾기 완료, 총 {len(pairs)}개의 세트 발견")
             print(f"pairs : {pairs}")
             if pairs and len(pairs) > 0:
                 perform_drag(pairs)  # 드래그 실행
