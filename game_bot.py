@@ -42,16 +42,20 @@ def extract_red_area(image):
 def process_image(image):
     print("이미지 처리 시작")
 
+    # 초기화
+    detected_numbers = []  # 숫자 리스트
+    positions = []  # 위치 리스트
+    cropped_images = []  # 잘라낸 이미지 리스트
+
     # HSV 변환 (배경과 사과 제거)
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     mask1 = cv2.inRange(hsv, LOWER_RED, UPPER_RED)
     mask2 = cv2.inRange(hsv, LOWER_RED2, UPPER_RED2)
     red_mask = cv2.bitwise_or(mask1, mask2)
 
-    # 숫자 영역만 하얗게, 나머지는 검은색으로 변환
-    processed_image = np.zeros_like(image)
-    processed_image[red_mask == 0] = [0, 0, 0]  # 배경 및 사과 → 검은색
-    processed_image[red_mask == 255] = [255, 255, 255]  # 숫자 → 흰색
+    # 숫자 영역만 흰색으로, 나머지는 검은색으로 변환
+    processed_image = np.zeros_like(image)  # 배경을 검은색으로 초기화
+    processed_image[red_mask == 255] = [255, 255, 255]  # 빨간색 영역을 흰색으로 설정
 
     # grayscale
     gray = cv2.cvtColor(processed_image, cv2.COLOR_BGR2GRAY)
@@ -62,10 +66,12 @@ def process_image(image):
     # Morphology 연산 적용
     kernel = np.ones((3, 3), np.uint8)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-    detected_numbers, positions, cropped_images = [], [], []
+
+    # 경계선 확인을 위한 Canny Edge Detection
+    edges = cv2.Canny(thresh, 100, 200)
 
     # 윤곽선 검출
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     print(f"찾은 윤곽선 개수: {len(contours)}")
 
     for cnt in contours:
@@ -85,12 +91,13 @@ def process_image(image):
                 cv2.imwrite(cropped_image_path, roi)
                 print(f"잘라낸 이미지 저장: {cropped_image_path}")
                 cropped_images.append(roi)
-
             else:
                 print(f"인식된 텍스트는 숫자가 아님: {num}")
                 cropped_image_path = os.path.join(script_dir, f"failed_{num}_{x}_{y}.png")
                 cv2.imwrite(cropped_image_path, roi)
                 print(f"잘라낸 이미지 저장: {cropped_image_path}")
+
+    return detected_numbers, positions
 
     return detected_numbers, positions
 
