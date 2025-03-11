@@ -116,6 +116,22 @@ def perform_drag(pairs):
             print(f"좌표가 화면 범위를 벗어났습니다: ({start_x}, {start_y}) -> ({end_x}, {end_y})")
 
 
+def find_sum_10_pairs(numbers, positions):
+    pairs = []
+    for i in range(len(numbers)):
+        for j in range(i + 1, len(numbers)):
+            if numbers[i] + numbers[j] == 10:
+                pair = (positions[i], positions[j])
+
+                # 그리드 좌표를 화면 좌표로 변환
+                start_screen_coords = grid_to_screen_coords(pair[0][0], pair[0][1])
+                end_screen_coords = grid_to_screen_coords(pair[1][0], pair[1][1])
+
+                pairs.append((start_screen_coords, end_screen_coords))
+    
+    return pairs
+
+
 class GameBotGUI:
     def __init__(self, root):
         self.root = root
@@ -219,47 +235,18 @@ class GameBotGUI:
                     self.canvas.create_text(x, y, text=str(self.grid_numbers[row][col]), font=("Arial", 14), fill="blue")
 
     def auto_play(self):
-        pairs = []
         self.label.config(text="자동 드래그 실행 중...")
         self.root.update()
 
-        while True:
-            print("계산 시작")
+        # 15x10 그리드에서 숫자들이 합산되는 쌍 찾기
+        pairs = find_sum_10_pairs(self.grid_numbers, self.positions)
 
-            print(f"{self.grid_numbers}")
-            pairs = []  # 합이 10이 되는 숫자 쌍을 저장할 리스트 초기화
-            
-            # 합이 10이 되는 숫자들 찾기
-            for i in range(len(self.grid_numbers)):
-                for j in range(i + 1, len(self.grid_numbers)):
-                    if self.grid_numbers[i] + self.grid_numbers[j] == 10:
-                        pair = (self.positions[i], self.positions[j])
-
-                        # 그리드 좌표를 화면 좌표로 변환
-                        start_screen_coords = grid_to_screen_coords(pair[0][0], pair[0][1])
-                        end_screen_coords = grid_to_screen_coords(pair[1][0], pair[1][1])
-
-                        pairs.append((start_screen_coords, end_screen_coords))
-
-                        # 드래그가 완료된 후 해당 숫자들을 0으로 설정
-                        self.grid_numbers[i] = 0
-                        self.grid_numbers[j] = 0
-
-                        # 해당 숫자들의 위치도 None으로 설정
-                        self.positions[i] = None
-                        self.positions[j] = None
-
-            print(f"합이 10인 쌍 찾기 완료, 총 {len(pairs)}개의 쌍 발견")
-            if pairs:
-                perform_drag(pairs)  # 드래그 실행
-                time.sleep(1)  # 드래그 후 잠시 대기
-            else:
-                break  # 더 이상 합이 10이 되는 숫자가 없으면 종료
-
-        # 자동 드래그 완료
-        self.label.config(text="자동 플레이 완료!")
+        if pairs:
+            perform_drag(pairs)
+            self.label.config(text="자동 플레이 완료!")
+        else:
+            self.label.config(text="합이 10이 되는 조합이 없음.")
         self.root.update()
-
 
 
 
